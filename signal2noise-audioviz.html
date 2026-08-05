@@ -7,7 +7,7 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 #app{background:#080808;font-family:monospace;overflow:hidden;display:flex;flex-direction:column;width:100%;height:100vh}
-#fireWrap{position:relative;width:100%;background:#000;flex:1;min-height:0;cursor:pointer;overflow:hidden}
+#fireWrap{position:relative;width:100%;background:#000;flex:1 1 auto;min-height:0;cursor:pointer;overflow:hidden}
 #cv,#vfx{position:absolute;top:0;left:0;width:100%;height:100%;display:block}
 #vfx{pointer-events:none}
 #transport{display:flex;align-items:center;gap:7px;padding:5px 9px;background:#050505;border-bottom:1px solid #161616;flex-wrap:wrap}
@@ -74,7 +74,7 @@ input[type=range]{accent-color:#f60}
 #title-bar span{color:#fa0;font-size:11px;font-weight:500;letter-spacing:1px}
 #title-bar .ver{color:#333;font-size:9px}
 /* ── Floating tool tray (v9 step 5) ── */
-#tray{position:fixed;z-index:40;left:0;right:0;bottom:0;height:44vh;overflow-y:auto;background:#080808f2;border-top:1px solid #1e1e1e;box-shadow:0 -8px 40px #000c}
+#tray{flex:0 0 auto;width:100%;height:44vh;overflow-y:auto;background:#080808;border-top:1px solid #1e1e1e}
 #tray.closed{display:none}
 #trayGrip{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;padding:7px 11px;cursor:ns-resize;user-select:none;touch-action:none;background:
   radial-gradient(at 12% 25%, rgba(246,2,51,.38) 0, transparent 55%),
@@ -87,7 +87,6 @@ input[type=range]{accent-color:#f60}
 #autoBtn.on{color:#000;background:#fa0;border-color:#fa0}
 #trayGrip .glabel{color:#fff;font-size:10px;letter-spacing:2px;text-shadow:0 1px 3px #000}
 #trayGrip .tctl label{color:#eeeeee99}
-#trayOpacity{width:70px}
 #trayHide{margin-left:auto;background:none;border:none;color:#ffffff99;font-size:12px;cursor:pointer;font-family:monospace;padding:0 3px}
 #trayHide:hover{color:#fff}
 #toolsBtn{margin-left:auto;background:#090909;color:#555;border:1px solid #161616;border-radius:2px;font-size:9px;padding:3px 9px;cursor:pointer;font-family:monospace;transition:color .1s,border-color .1s}
@@ -102,11 +101,11 @@ input[type=range]{accent-color:#f60}
 </head>
 <body style="background:#111;padding:0;margin:0;overflow:hidden">
 <div id="app">
-<div id="title-bar"><span>SIGNAL2NOISE AUDIOVIZ</span><span class="ver">v9 &middot; step 6: docked tray</span><button id="toolsBtn" class="on">tools</button></div>
+<div id="title-bar"><span>SIGNAL2NOISE AUDIOVIZ</span><span class="ver">v9 &middot; step 8: gravity + bounded viz</span><button id="toolsBtn" class="on">tools</button></div>
 <div id="viewTabs"><label>view:</label></div>
 <div id="fireWrap"><canvas id="cv"></canvas><canvas id="vfx"></canvas></div>
 <div id="tray">
-<div id="trayGrip"><span class="glabel">TOOLS</span><div class="tctl"><label>opacity</label><input type="range" id="trayOpacity" min="0.25" max="1" step="0.05" value="1"></div><button id="autoBtn" title="auto-hide on pointer leave">auto</button><button id="trayHide" title="hide (h)">&#10005;</button></div>
+<div id="trayGrip"><span class="glabel">TOOLS</span><button id="autoBtn" title="auto-hide on pointer leave">auto</button><button id="trayHide" title="hide (h)">&#10005;</button></div>
 <div id="transport">
   <button id="playBtn">&#9654; play</button>
   <div class="tctl"><label>bpm</label><input type="range" id="bpmSlider" min="60" max="200" value="90" step="1"><span class="tval" id="bpmVal">90</span></div>
@@ -562,6 +561,336 @@ function createLyricRenderer(){
   };
 }
 
+// ── Gravity — colliding galactic cores, Barnes-Hut n-body ──
+// Force model: softened Newtonian gravity, mutual (the cloud self-gravitates,
+// which is what makes tidal tails and shells appear rather than tidy orbits).
+//
+// ALGORITHM NOTE. Direct summation is O(N²) — at N=700 that's ~490k pair
+// evaluations per frame, too slow at 60fps in JS. This uses Barnes-Hut:
+// build a quadtree, and if a node subtends a small enough angle (size/dist <
+// THETA) treat its whole subtree as one body at its center of mass. O(N log N),
+// error ~1% — invisible here.
+//
+// The adaptive Fast Multipole Algorithm (Carrier, Greengard & Rokhlin, SIAM
+// J. Sci. Stat. Comput. 9(4) 1988) is the O(N) answer, but its own Table 1
+// shows the crossover: at N=100 adaptive FMM and direct summation tie, and it
+// takes N≈1600 to reach ~10× over direct. FMM buys near-round-off accuracy at
+// large N via p-term multipole expansions (p≈|log₂ε|) plus five interaction
+// lists per box — thousands of lines for accuracy this view does not need.
+// Borrowed from that paper instead (§3.1): adaptive subdivision with a leaf
+// capacity S_LEAF rather than one-body-per-leaf, which keeps the tree shallow
+// on heavily clustered distributions — i.e. exactly the colliding-galaxy case.
+// accelAt() is the seam: swap in FMM there if N ever justifies it.
+function createGravityRenderer(){
+  let ctx=null,vx=null,FW=0,FH=0;
+  const NP=700;            // cloud particles
+  const NCORE=4;           // galactic cores
+  const THETA=0.7;         // Barnes-Hut opening angle
+  const EPS2=90;           // softening² — prevents singular close encounters
+  const G=0.62;
+  const S_LEAF=4;          // adaptive leaf capacity (CGR §3.1 idea)
+  const MAXD=18;           // depth cap: coincident points must terminate
+  const QCAP=6000;
+  const VMAX=7;            // core speed cap (px/frame) — anti-tunneling
+  const capture=c=>6+Math.sqrt(c.m)*0.30;   // capture radius grows with mass
+  // Mass was MONOTONIC: merges conserve it, triggers add it, replacement cores
+  // bring more — so it ran away to one screen-filling sun. The system had no
+  // SINK. Ceilings alone would only stall it at the cap; decay gives a real
+  // equilibrium. Cores shed mass continuously back into the cloud (stellar
+  // wind / AGN feedback), so injection and decay balance and total mass sits
+  // wherever the music puts it. Fragmentation stays as a rare safety valve.
+  const M_DECAY=0.9968;    // per-frame core mass decay → ~0.19 of mass/sec @60fps
+  const M_MIN=90;          // floor: cores persist, they don't evaporate
+  const M_MAX=2200;        // ceiling → starburst fragmentation (now rare)
+  // MAXCORE bounds every core-indexed allocation. NCORE is the STARTING count,
+  // not the maximum: fragmentation raises it. Sizing the packed body arrays to
+  // NP+NCORE let bn overrun once a core split — and Float32Array discards
+  // out-of-range writes SILENTLY, so those slots read back undefined, the
+  // quadtree bounds went NaN, and the whole simulation corrupted one frame
+  // later with no error. Allocate by MAXCORE and enforce it.
+  const MAXCORE=8;
+
+  let px,py,pvx,pvy,pOwner;      // particle state
+  let cores=[];
+  let spin=0,R_MAX=60;
+  // Quadtree, flat typed arrays (no per-frame object churn)
+  let qX,qY,qHalf,qMass,qSx,qSy,qCh,qCnt,qB0,qBodies,qN;
+  let bx=null,by=null,bm=null,bn=0;   // packed body list rebuilt each frame
+  let stack=null;
+  let accX=0,accY=0;
+
+  function allocTree(){
+    qX=new Float32Array(QCAP);qY=new Float32Array(QCAP);qHalf=new Float32Array(QCAP);
+    qMass=new Float32Array(QCAP);qSx=new Float32Array(QCAP);qSy=new Float32Array(QCAP);
+    qCh=new Int32Array(QCAP*4);qCnt=new Int32Array(QCAP);qB0=new Int32Array(QCAP);
+    qBodies=new Int32Array((NP+MAXCORE)*(MAXD+2));
+    stack=new Int32Array(4096);
+  }
+  function newNode(x,y,h){
+    const i=qN++;
+    if(i>=QCAP)return QCAP-1;
+    qX[i]=x;qY[i]=y;qHalf[i]=h;qMass[i]=0;qSx[i]=0;qSy[i]=0;qCnt[i]=0;qB0[i]=-1;
+    qCh[i*4]=qCh[i*4+1]=qCh[i*4+2]=qCh[i*4+3]=-1;
+    return i;
+  }
+  // Leaf body storage: each leaf owns a small slab of qBodies
+  let slabTop=0;
+  function leafPush(n,b){
+    if(qB0[n]<0){qB0[n]=slabTop;slabTop+=S_LEAF+1;}
+    if(qCnt[n]<S_LEAF)qBodies[qB0[n]+qCnt[n]]=b;
+    qCnt[n]++;
+  }
+  function insert(root,b,depth){
+    let n=root;
+    for(;;){
+      qMass[n]+=bm[b];qSx[n]+=bx[b]*bm[b];qSy[n]+=by[b]*bm[b];
+      const isLeaf=qCh[n*4]<0;
+      if(isLeaf&&(qCnt[n]<S_LEAF||depth>=MAXD)){leafPush(n,b);return;}
+      if(isLeaf){
+        // split: push existing bodies down one level, then continue with b
+        const h=qHalf[n]*.5,cx=qX[n],cy=qY[n];
+        for(let k=0;k<4;k++)qCh[n*4+k]=newNode(cx+(k&1?h:-h),cy+(k&2?h:-h),h);
+        const cnt=Math.min(qCnt[n],S_LEAF),base=qB0[n];
+        qCnt[n]=0;
+        for(let j=0;j<cnt;j++){
+          const ob=qBodies[base+j],oq=(bx[ob]>=cx?1:0)+(by[ob]>=cy?2:0),oc=qCh[n*4+oq];
+          qMass[oc]+=bm[ob];qSx[oc]+=bx[ob]*bm[ob];qSy[oc]+=by[ob]*bm[ob];
+          leafPush(oc,ob);
+        }
+      }
+      const q=(bx[b]>=qX[n]?1:0)+(by[b]>=qY[n]?2:0);
+      n=qCh[n*4+q];depth++;
+      if(depth>MAXD+2){leafPush(n,b);return;}
+    }
+  }
+  function buildTree(){
+    qN=0;slabTop=0;
+    let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
+    for(let i=0;i<bn;i++){if(bx[i]<minx)minx=bx[i];if(bx[i]>maxx)maxx=bx[i];if(by[i]<miny)miny=by[i];if(by[i]>maxy)maxy=by[i];}
+    const cx=(minx+maxx)*.5,cy=(miny+maxy)*.5;
+    const half=Math.max(maxx-minx,maxy-miny)*.5+1;
+    const root=newNode(cx,cy,half);
+    for(let i=0;i<bn;i++)insert(root,i,0);
+    return root;
+  }
+  // accelAt: the swap seam. Barnes-Hut traversal today; FMM could live here.
+  function accelAt(root,x,y){
+    accX=0;accY=0;
+    let sp=0;stack[sp++]=root;
+    while(sp>0){
+      const n=stack[--sp],m=qMass[n];
+      if(m<=0)continue;
+      const cx=qSx[n]/m,cy=qSy[n]/m;
+      const dx=cx-x,dy=cy-y,d2=dx*dx+dy*dy+EPS2;
+      const size=qHalf[n]*2;
+      if(qCh[n*4]<0||size*size<THETA*THETA*d2){
+        const inv=1/Math.sqrt(d2),s=G*m*inv*inv*inv;
+        accX+=dx*s;accY+=dy*s;
+      }else{
+        for(let k=0;k<4;k++){const c=qCh[n*4+k];if(c>=0&&sp<4090)stack[sp++]=c;}
+      }
+    }
+  }
+  // Anchor the FRAME on the luminous mass — the cores — not on the system COM.
+  // Earlier fix used the full COM and still let the view wander: ejected cloud
+  // particles form an asymmetric halo that holds the COM at center while the
+  // bright core sits off-frame. The eye tracks the cores, so the cores define
+  // the frame. Velocity subtraction is still a uniform Galilean boost (applied
+  // to every body, so relative motion is untouched); position is eased, not
+  // snapped, so the fade-trails don't smear.
+  function recenterCOM(){
+    // Weight by m² so the dominant core sets the frame: a mass-weighted mean
+    // still lets one flung core drag the view, and then the frame chases the
+    // runaway and pushes everything else off the other edge.
+    let M=0,mvx=0,mvy=0,cx=0,cy=0;
+    cores.forEach(c=>{const w=c.m*c.m;M+=w;mvx+=c.vx*w;mvy+=c.vy*w;cx+=c.x*w;cy+=c.y*w;});
+    if(!(M>0))return;
+    mvx/=M;mvy/=M;cx/=M;cy/=M;
+    const ox=(FW*0.5-cx)*0.08,oy=(FH*0.5-cy)*0.08;
+    for(let i=0;i<NP;i++){pvx[i]-=mvx;pvy[i]-=mvy;px[i]+=ox;py[i]+=oy;}
+    cores.forEach(c=>{c.vx-=mvx;c.vy-=mvy;c.x+=ox;c.y+=oy;});
+  }
+  // Weak background halo: a soft restoring pull that only bites beyond RMAX.
+  // Physically it's a background potential (the dark-matter halo the galaxies
+  // sit in); practically it's what stops wide two-core orbits from swinging
+  // off-frame. Zero effect inside RMAX, so normal dynamics are untouched.
+  // ELLIPTICAL boundary, quadratic falloff. A circular halo on a 640x440
+  // canvas leaves the vertical edges unguarded (its radius has to fit the
+  // SHORT axis, so it permits escape past the long one); and a linear pull is
+  // too gentle to arrest a core travelling at VMAX before it clears the frame.
+  // Normalizing by Rx/Ry separately fits the boundary to the canvas, and the
+  // quadratic term makes the pull bite hard once a core is genuinely leaving.
+  function haloPull(x,y,vxr,vyr,strength){
+    const dx=x-FW*0.5,dy=y-FH*0.5;
+    const nx=dx/(FW*0.30),ny=dy/(FH*0.30),q=Math.hypot(nx,ny);
+    if(q<=1)return [vxr,vyr];
+    const d=Math.hypot(dx,dy);if(d<1e-6)return [vxr,vyr];
+    const e=q-1,k=(e+e*e*2.5)*strength;
+    return [vxr-dx/d*k,vyr-dy/d*k];
+  }
+  function seedParticle(i,ci){
+    const c=cores[ci],a=Math.random()*Math.PI*2,r=18+Math.random()*70;
+    px[i]=c.x+Math.cos(a)*r;py[i]=c.y+Math.sin(a)*r;
+    const v=Math.sqrt(G*c.m/(r+8))*(0.86+Math.random()*.18),dir=c.spin;
+    pvx[i]=c.vx-Math.sin(a)*v*dir;pvy[i]=c.vy+Math.cos(a)*v*dir;
+    pOwner[i]=ci;
+  }
+  function totalMass(){let t=0;cores.forEach(c=>t+=c.m);return t;}
+  // Starburst: an over-massive core blows apart into three. Mass is conserved
+  // across the split, fragments are placed beyond their combined capture radii
+  // and given a noMerge cooldown so they don't instantly recombine.
+  function fragment(idx){
+    const c=cores[idx],n=3,m=c.m/n,base=Math.random()*Math.PI*2;
+    cores.splice(idx,1);
+    for(let k=0;k<n;k++){
+      const a=base+k*Math.PI*2/n,r=(6+Math.sqrt(m)*0.30)*2.6+18;
+      cores.push({x:c.x+Math.cos(a)*r,y:c.y+Math.sin(a)*r,
+        vx:c.vx+Math.cos(a)*2.4,vy:c.vy+Math.sin(a)*2.4,
+        m,col:CHANNELS[((k*5+3)*3)%16].color,
+        spin:Math.random()<.5?-1:1,flare:2.6,noMerge:80});
+    }
+    for(let i=0;i<NP;i++)pOwner[i]=i%cores.length;
+  }
+  function makeCore(k){
+    const a=(k/NCORE)*Math.PI*2+spin,R=Math.min(FW,FH)*.28;
+    return {x:FW/2+Math.cos(a)*R,y:FH/2+Math.sin(a)*R,
+            vx:-Math.sin(a)*0.55,vy:Math.cos(a)*0.55,
+            m:260+Math.random()*160,col:CHANNELS[(k*4)%16].color,
+            spin:Math.random()<.5?-1:1,flare:0};
+  }
+
+  return {
+    id:'gravity',
+    init(env){
+      ctx=env.ctx;vx=env.vx;FW=env.FW;FH=env.FH;
+      allocTree();
+      px=new Float32Array(NP);py=new Float32Array(NP);
+      pvx=new Float32Array(NP);pvy=new Float32Array(NP);
+      pOwner=new Int32Array(NP);
+      spin=Math.random()*Math.PI*2;
+      R_MAX=Math.min(FW,FH)*0.13;
+      cores=[];for(let k=0;k<NCORE;k++)cores.push(makeCore(k));
+      for(let i=0;i<NP;i++)seedParticle(i,i%NCORE);
+      bx=new Float32Array(NP+MAXCORE);by=new Float32Array(NP+MAXCORE);bm=new Float32Array(NP+MAXCORE);
+      ctx.fillStyle='#000';ctx.fillRect(0,0,FW,FH);
+    },
+    onTrigger(e){
+      const k=e.ci%NCORE,c=cores[k];
+      c.flare=Math.min(2.2,c.flare+0.5+e.vol*e.viz*0.5);
+      if(e.xFrac<0.35){
+        // low register: mass injection — deepens the well, pulls the collision in
+        c.m+=26*e.vol*e.viz;
+      }else if(e.xFrac<0.62){
+        // mid: velocity kick toward the field's center of mass (hastens mergers)
+        let mx=0,my=0,mt=0;cores.forEach(o=>{mx+=o.x*o.m;my+=o.y*o.m;mt+=o.m;});
+        const dx=mx/mt-c.x,dy=my/mt-c.y,d=Math.hypot(dx,dy)+1e-3;
+        c.vx+=dx/d*0.5*e.vol;c.vy+=dy/d*0.5*e.vol;
+      }else{
+        // high register: shimmer — radial impulse on that core's cloud
+        let n=0;
+        for(let i=0;i<NP&&n<90;i++){
+          if(pOwner[i]!==k)continue;
+          const dx=px[i]-c.x,dy=py[i]-c.y,d=Math.hypot(dx,dy)+1e-3;
+          pvx[i]+=dx/d*0.9*e.vol*e.viz;pvy[i]+=dy/d*0.9*e.vol*e.viz;n++;
+        }
+      }
+    },
+    tick(frame){
+      const fd=frame.seqFreq;
+      let bass=0;for(let i=0;i<Math.floor(fd.length*.1);i++)bass+=fd[i];
+      bass/=(Math.floor(fd.length*.1)*255);
+      // pack bodies: particles then cores
+      bn=0;
+      for(let i=0;i<NP;i++){bx[bn]=px[i];by[bn]=py[i];bm[bn]=1;bn++;}
+      if(cores.length>MAXCORE)cores.length=MAXCORE;   // invariant: bn <= NP+MAXCORE
+      cores.forEach(c=>{bx[bn]=c.x;by[bn]=c.y;bm[bn]=c.m;bn++;});
+      const root=buildTree();
+      // integrate particles
+      for(let i=0;i<NP;i++){
+        accelAt(root,px[i],py[i]);
+        pvx[i]+=accX;pvy[i]+=accY;
+        const hv=haloPull(px[i],py[i],pvx[i],pvy[i],0.16);pvx[i]=hv[0];pvy[i]=hv[1];
+        pvx[i]*=0.9995;pvy[i]*=0.9995;
+        px[i]+=pvx[i];py[i]+=pvy[i];
+        if(px[i]<-FW*.3||px[i]>FW*1.3||py[i]<-FH*.3||py[i]>FH*1.3)seedParticle(i,(Math.random()*cores.length)|0);
+      }
+      // integrate cores
+      cores.forEach(c=>{
+        accelAt(root,c.x,c.y);
+        c.vx+=accX;c.vy+=accY;
+        // shed: mass leaves the core and returns to the cloud as visible ejecta
+        if(c.m>M_MIN){
+          const shed=c.m*(1-M_DECAY);
+          c.m-=shed;
+          if(shed>0.35&&Math.random()<Math.min(.7,shed*.22)){
+            const i=(Math.random()*NP)|0,a=Math.random()*Math.PI*2,rr=capture(c)+3;
+            px[i]=c.x+Math.cos(a)*rr;py[i]=c.y+Math.sin(a)*rr;
+            const ev=1.1+Math.random()*1.5;
+            pvx[i]=c.vx+Math.cos(a)*ev;pvy[i]=c.vy+Math.sin(a)*ev;
+            pOwner[i]=cores.indexOf(c);
+          }
+        }
+        const hv=haloPull(c.x,c.y,c.vx,c.vy,1.05);c.vx=hv[0];c.vy=hv[1];
+        // Speed cap: a core moving further per frame than its capture radius
+        // tunnels straight through a merge instead of triggering it, and exits
+        // slingshotted. VMAX < smallest capture radius makes that impossible.
+        const sp=Math.hypot(c.vx,c.vy);
+        if(sp>VMAX){c.vx=c.vx/sp*VMAX;c.vy=c.vy/sp*VMAX;}
+        c.x+=c.vx;c.y+=c.vy;c.flare*=0.90;
+      });
+      // mergers — the collision payoff
+      for(let a=0;a<cores.length;a++)for(let b2=a+1;b2<cores.length;b2++){
+        const A=cores[a],B=cores[b2];
+        if((A.noMerge|0)>0||(B.noMerge|0)>0)continue;
+        if(Math.hypot(A.x-B.x,A.y-B.y)<capture(A)+capture(B)){
+          const M=A.m+B.m;
+          A.vx=(A.vx*A.m+B.vx*B.m)/M;A.vy=(A.vy*A.m+B.vy*B.m)/M;
+          A.x=(A.x*A.m+B.x*B.m)/M;A.y=(A.y*A.m+B.y*B.m)/M;
+          A.m=M;A.flare=2.4;
+          for(let i=0;i<NP;i++)if(pOwner[i]===b2)pOwner[i]=a;
+          cores.splice(b2,1);
+          if(cores.length<NCORE)cores.push(makeCore((Math.random()*NCORE)|0));
+          a=cores.length;break;
+        }
+      }
+      // cooldowns, then fragment anything over the ceiling
+      for(let k=0;k<cores.length;k++){
+        if(cores[k].noMerge>0)cores[k].noMerge--;
+        if(cores[k].m>M_MAX&&cores.length+2<=MAXCORE){fragment(k);break;}
+      }
+      if(cores.length===0)cores.push(makeCore(0));
+      for(let i=0;i<NP;i++)if(pOwner[i]>=cores.length)pOwner[i]=(Math.random()*cores.length)|0;
+      recenterCOM();
+      // ── draw: fade for trails, never clear ──
+      ctx.fillStyle='rgba(0,0,0,'+(0.13-bass*0.05).toFixed(3)+')';
+      ctx.fillRect(0,0,FW,FH);
+      for(let i=0;i<NP;i++){
+        const c=cores[pOwner[i]]||cores[0];
+        const sp2=pvx[i]*pvx[i]+pvy[i]*pvy[i];
+        ctx.fillStyle=c.col;
+        ctx.globalAlpha=Math.min(.95,.30+sp2*.05)*Math.min(1.4,vizIntensity);
+        const s=sp2>6?1.7:1.1;
+        ctx.fillRect(px[i],py[i],s,s);
+      }
+      ctx.globalAlpha=1;
+      cores.forEach(c=>{
+        const r=Math.min(R_MAX,8+Math.sqrt(c.m)*0.5+c.flare*9);
+        const g=ctx.createRadialGradient(c.x,c.y,0,c.x,c.y,r);
+        g.addColorStop(0,'#ffffff');g.addColorStop(0.25,c.col);g.addColorStop(1,'transparent');
+        ctx.globalAlpha=Math.min(1,.5+c.flare*.35);
+        ctx.fillStyle=g;ctx.beginPath();ctx.arc(c.x,c.y,r,0,Math.PI*2);ctx.fill();
+        ctx.globalAlpha=1;
+      });
+      vx.clearRect(0,0,FW,FH);
+    },
+    dispose(){
+      px=py=pvx=pvy=pOwner=null;cores=[];
+      qX=qY=qHalf=qMass=qSx=qSy=qCh=qCnt=qB0=qBodies=stack=null;
+      bx=by=bm=null;ctx=null;vx=null;
+    }
+  };
+}
+
 // ══════════════════════════════════════════════════════════════════
 // View manager + tab bar
 // Adding a view later = one entry here + one createXxxRenderer factory.
@@ -571,6 +900,7 @@ const VIEWS=[
   {id:'alpha',label:'alpha',create:createAlphaRenderer},
   {id:'spiral',label:'spiral',create:createSpiralRenderer},
   {id:'lyric',label:'lyric',create:createLyricRenderer},
+  {id:'gravity',label:'gravity',create:createGravityRenderer},
 ];
 let activeView=null,unsubTrigger=null;
 
@@ -849,13 +1179,17 @@ document.getElementById('trayHide').addEventListener('click',()=>setTray(false))
 document.addEventListener('keydown',e=>{
   if(e.key==='h'&&e.target.tagName!=='INPUT'&&e.target.tagName!=='TEXTAREA')setTray(!trayOpen);
 });
-document.getElementById('trayOpacity').addEventListener('input',function(){trayEl.style.opacity=this.value;});
 // Dock resize: grab the grip, drag up/down; the viz keeps the rest.
 const grip=document.getElementById('trayGrip');
 const GRIP_H=34;                                   // collapsed = grip only
 let trayH=Math.round(window.innerHeight*0.44);     // last expanded height
 let resizing=false,autoHide=false,collapsed=false;
-function applyTrayH(h){trayEl.style.height=Math.round(h)+'px';}
+const VIZ_MIN=140;
+function maxTrayH(){
+  const top=document.getElementById('fireWrap').getBoundingClientRect().top||0;
+  return Math.max(GRIP_H,window.innerHeight-top-VIZ_MIN);
+}
+function applyTrayH(h){trayEl.style.height=Math.round(Math.min(h,maxTrayH()))+'px';}
 function expandTray(){collapsed=false;applyTrayH(trayH);}
 function collapseTray(){collapsed=true;applyTrayH(GRIP_H);}
 grip.addEventListener('pointerdown',e=>{
@@ -864,7 +1198,7 @@ grip.addEventListener('pointerdown',e=>{
 });
 grip.addEventListener('pointermove',e=>{
   if(!resizing)return;
-  const h=Math.min(Math.max(GRIP_H,window.innerHeight-e.clientY),window.innerHeight*.92);
+  const h=Math.min(Math.max(GRIP_H,window.innerHeight-e.clientY),maxTrayH());
   collapsed=h<=GRIP_H+2;
   if(!collapsed)trayH=h;   // only remember expanded heights — drag-collapse must not clobber the restore point
   applyTrayH(h);
@@ -880,7 +1214,7 @@ autoBtn.addEventListener('click',()=>{
 });
 trayEl.addEventListener('pointerenter',()=>{if(autoHide&&!resizing)expandTray();});
 trayEl.addEventListener('pointerleave',()=>{if(autoHide&&!resizing)collapseTray();});
-window.addEventListener('resize',()=>{if(!collapsed)applyTrayH(Math.min(trayH,window.innerHeight*.92));});
+window.addEventListener('resize',()=>{if(!collapsed)applyTrayH(trayH);});
 
 // ── Init ──
 switchView('alpha');

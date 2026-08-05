@@ -8,7 +8,7 @@
 
 ## 1. Current state
 
-- **Current version:** `v9/signal2noise_v9.html` — v9 step 5 (floating tools)
+- **Current version:** `signal2noise-audioviz.html` (repo root) — v9 step 8
   - step 1 renderer extraction: ✅ committed, checkpoint passed
   - step 2 spiral view: ✅ checkpoint passed (feedback engine, bass→rotation, treble/mic→zoom)
   - step 3 tool tray: gate passed, ⬜ browser checkpoint pending
@@ -41,6 +41,59 @@
   browser permission previously denied for the origin, or OS mic privacy settings.
   Not a current priority. Revisit before any sampler work.
 
+
+### Steps 6-8 (this session)
+
+- **step 6 docked tray** — bottom drawer; grip drag = ns-resize; dblclick collapse/expand; `auto` = collapse on pointerleave. Render height FH 220 to 440.
+- **step 7 GRAVITY VIEW** — Barnes-Hut n-body. theta=0.7, softening eps2=90, adaptive leaf capacity S_LEAF=4 (borrowed from Carrier-Greengard-Rokhlin 1988 section 3.1). 700 particles + 4 cores, mutual self-gravity, momentum-conserving mergers. Triggers by register: low=mass injection, mid=velocity kick toward field COM, high=radial shimmer.
+  MEASURED: 1.0% mean / 4.8% worst force error vs direct O(N^2); 3.0 ms/frame vs 9.5 ms direct; 5.6x headroom at 60fps.
+  FMM DECLINED: its own Table 1 shows direct and adaptive FMM tie at N=100 and FMM needs N~1600 for 10x. accelAt() is the documented swap seam.
+- **step 7.1/7.2 containment** — merged remnant drifted off screen. Causes: (a) CORE TUNNELING, merge fired at a fixed 16px but a slingshotting core travels further per frame and passes through; fixed with mass-scaled capture radius (6+0.30*sqrt(m)) AND speed cap VMAX=7 strictly below the minimum capture radius. (b) FRAME CHASING A RUNAWAY, centroid anchoring let one flung core drag the view; fixed by weighting m^2 so the dominant core sets the frame. (c) NO OUTER BOUND; fixed with haloPull(), zero inside 0.30 normalized ellipse, quadratic outside.
+- **step 7.3 MASS SINK + BUFFER OVERRUN** — screen filled with one giant sun. Mass was monotonic with NO SINK. Cores now decay (M_DECAY=0.9968, floor M_MIN=90) shedding visible ejecta; fragmentation (M_MAX=2200, 3-way starburst, 80-frame noMerge cooldown) is a rare safety valve.
+  *** THE REAL BUG: NaN, not drift. *** Packed body arrays were sized NP+NCORE. NCORE is the STARTING core count, not the max, so fragmentation pushed bn past the end. Float32Array DISCARDS out-of-range writes SILENTLY; slots read back undefined, quadtree bounds went NaN, every body corrupted one frame later with nothing thrown. The onscreen check read NaN as "offscreen", which is why two rounds of halo tuning did nothing. Fixed with MAXCORE=8 bounding every core-indexed allocation.
+  MEASURED (idle/moderate/hammered/brutal, 6k-12k frames): NaN frames 0 in all four; cores onscreen 100% in all four; equilibrium mass 3192/3581/8099/12148, bounded.
+- **step 8 bounded viz** — opacity slider REMOVED. Tray is a flex sibling occupying real layout space, so the viz renders strictly ABOVE the beat area and tray height / viz height trade off directly. VIZ_MIN=140 floor.
+- **LYRIC VIEW** — built in a PARALLEL SESSION. Scrolling kinetic typography, per-letter bass envelope with fast attack / slow release, focus line at 40% width, travelling wave, hue cycling. Text from the `lyricIn` transport input via the app-level `lyricText` global.
+
+### MULTI-SESSION MERGE HAZARD (near-miss, 2026-08-05)
+
+The lyric view was built in one thread while gravity was built in another. The second
+session generated a patch against its own copy, whose hash matched the repo exactly --
+because the UPLOAD matched, not because the sessions agreed. Applying it would have
+silently DELETED the lyric renderer, its transport input, and its state global.
+RULE: when more than one session touches this single-file app, ALWAYS diff against the
+live repo file and read the diff for DELETIONS before writing. A matching hash proves
+your base is current; it does NOT prove your changes are additive. Merge onto the repo
+file rather than replacing it. Verify with: git diff -U0 | findstr "^-"
+
+### Particle-system checklist (scar tissue from the gravity view)
+
+Check any view where things MOVE, COMBINE or ACCUMULATE -- Sand and Organic especially.
+
+- **Speed vs radius.** Cap speed strictly BELOW the smallest interaction radius or fast
+  bodies tunnel through the check. Make it impossible by construction, not by tuning.
+- **Scale capture radius** with whatever makes a body dominant, or big bodies whip past
+  instead of absorbing.
+- **Sources need sinks.** Any quantity with a source and no sink grows monotonically and
+  ends the show. A ceiling only STALLS it; add decay/shed/evaporate. Make the sink visible.
+- **Anchor on the LUMINOUS mass**, not the statistical mean; weight superlinearly so one
+  runaway cannot hijack the frame.
+- **Shape containment like the CANVAS.** A circle on a 640x440 pane fits the SHORT axis
+  and leaves the long axis unguarded. Make the restoring force superlinear.
+- **Size buffers by the MAXIMUM count, never the INITIAL count.** A later feature WILL
+  exceed the starting number, and typed arrays discard overflow SILENTLY.
+- **Gate the OBSERVABLE that was reported**, not a statistic that correlates with it.
+  Scan for non-finite values every frame -- a corrupted sim and a wandering sim look
+  IDENTICAL through a boolean position check.
+- **When a fix has NO EFFECT, stop tuning and trace the state.**
+
+REUSE NOTE: Barnes-Hut only pays above roughly N~150; below that the tree build costs
+more than direct summation. Alpha's creatures (16), Spiral's comets (~120) and Organic's
+blobs (~16) should all use direct summation. Sand is a CONTACT problem (short-range
+neighbours), not long-range 1/r^2 -- a uniform grid or heightmap beats a tree there. Do
+NOT extract a shared physics module until a second view genuinely needs long-range
+forces; the MERGE MECHANICS (capture radius, mass-conserving absorption, cooldown,
+respawn) are the part that will actually transfer, and Organic is the likely first caller.
 ## 2. File map
 
 ```

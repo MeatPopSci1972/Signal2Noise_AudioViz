@@ -19,7 +19,9 @@ Originally inspired by Cthugha (1993), a classic DOS fire-and-waveform visualize
 - **6 VFX types per channel** — fire, strobe rings, balloons, sparkles, fireworks (googly-eyed), animorphic creatures
 - **Channel strip** — click channel names to select; one tri-state control set (VFX pills, volume, ⚡int) applies to the whole selection
 - **Per-channel intensity** — ⚡int flags which channels ride the intensity slider; excluded channels stay at baseline
-- **Docked tool tray** — full-bleed visualizer with a bottom drawer: drag the mesh-gradient grip to resize, double-click to collapse, `auto` to auto-hide on pointer leave, opacity slider to see the viz through the tools
+- **Docked tool tray** — full-bleed visualizer with a bottom drawer: drag the mesh-gradient grip to resize, double-click to collapse, `auto` to auto-hide on pointer leave
+- **Lyric view** — scrolling kinetic typography: per-letter sizing driven by a bass envelope, a focus line where glyphs swell and a travelling wave runs, text set live from the transport bar
+- **Gravity view** — Barnes-Hut n-body: colliding galactic cores with self-gravitating clouds, momentum-conserving mergers, drums inject mass and velocity
 - **Mic sampler + preset builder** — record audio, onset detection + spectral centroid classifier auto-builds a drum pattern
 - **5 built-in presets** — boom bap, house, jungle, hip-hop, techno + random + clear
 
@@ -64,6 +66,8 @@ Originally inspired by Cthugha (1993), a classic DOS fire-and-waveform visualize
 |------|--------|-----------|
 | alpha | ✅ shipped (v9 step 1) | Cthugha-lineage fire + VFX + creatures (the v8 look) |
 | spiral | ✅ shipped (v9 step 2) | Feedback buffer with pixel ghosting — no clear, translucent fade + rotate |
+| lyric | ✅ shipped | Scrolling kinetic typography; per-letter bass-driven intensity, focus line, travelling wave |
+| gravity | ✅ shipped (v9 step 7) | Barnes-Hut n-body; galactic cores collide and merge, triggers add mass and velocity |
 | sand | next | Particle deposition; channels pour colored grains, the pile is the song's history |
 | organic | planned | Metaballs; channel blobs grow on triggers and absorb each other |
 | galactic | planned | Softened n-body; mass centers per channel group, triggers add mass and velocity |
@@ -82,7 +86,7 @@ Open `signal2noise-audioviz.html` directly in any modern browser.
 
 Click the visualizer first to unlock the AudioContext, then hit **play** or click a preset. Spacebar toggles play; `h` toggles the tool tray.
 
-The tools live in a bottom drawer: drag its gradient grip to resize, double-click it to collapse, `auto` to auto-hide, and the opacity slider to watch the viz through the panel. Click channel names to select them; the control strip applies to the selection.
+The tools live in a bottom drawer: drag its gradient grip to resize, double-click it to collapse, `auto` to auto-hide; the viz takes whatever space the tray gives back. Click channel names to select them; the control strip applies to the selection.
 
 For mic input / sampler: click **arm mic** and grant browser microphone permission. (Known issue: a permission error is under investigation — see HANDOFF.md.)
 
