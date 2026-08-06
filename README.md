@@ -21,7 +21,7 @@ Originally inspired by Cthugha (1993), a classic DOS fire-and-waveform visualize
 - **Per-channel intensity** — ⚡int flags which channels ride the intensity slider; excluded channels stay at baseline
 - **Docked tool tray** — full-bleed visualizer with a bottom drawer: drag the mesh-gradient grip to resize, double-click to collapse, `auto` to auto-hide on pointer leave
 - **Lyric view** — scrolling kinetic typography: per-letter sizing driven by a bass envelope, a focus line where glyphs swell and a travelling wave runs, text set live from the transport bar
-- **Gravity view** — Barnes-Hut n-body: colliding galactic cores with self-gravitating clouds, momentum-conserving mergers, drums inject mass and velocity
+- **Gravity view** — a primary, a secondary, and a moon per channel: each channel's first hit spawns a moon, its orbit decays continuously and every hit shoves it back out, so busy channels hold wide moons, sparse ones spiral in and strike, and silence returns the system to two bodies
 - **Mic sampler + preset builder** — record audio, onset detection + spectral centroid classifier auto-builds a drum pattern
 - **5 built-in presets** — boom bap, house, jungle, hip-hop, techno + random + clear
 
@@ -67,7 +67,7 @@ Originally inspired by Cthugha (1993), a classic DOS fire-and-waveform visualize
 | alpha | ✅ shipped (v9 step 1) | Cthugha-lineage fire + VFX + creatures (the v8 look) |
 | spiral | ✅ shipped (v9 step 2) | Feedback buffer with pixel ghosting — no clear, translucent fade + rotate |
 | lyric | ✅ shipped | Scrolling kinetic typography; per-letter bass-driven intensity, focus line, travelling wave |
-| gravity | ✅ shipped (v9 step 7) | Barnes-Hut n-body; galactic cores collide and merge, triggers add mass and velocity |
+| gravity | ✅ shipped (v9 step 9) | Primary, secondary, and a moon per channel; orbital decay versus trigger rate makes the music legible without any state flag |
 | sand | next | Particle deposition; channels pour colored grains, the pile is the song's history |
 | organic | planned | Metaballs; channel blobs grow on triggers and absorb each other |
 | galactic | planned | Softened n-body; mass centers per channel group, triggers add mass and velocity |

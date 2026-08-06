@@ -8,7 +8,7 @@
 
 ## 1. Current state
 
-- **Current version:** `signal2noise-audioviz.html` (repo root) — v9 step 8
+- **Current version:** `signal2noise-audioviz.html` (repo root) — v9 step 9
   - step 1 renderer extraction: ✅ committed, checkpoint passed
   - step 2 spiral view: ✅ checkpoint passed (feedback engine, bass→rotation, treble/mic→zoom)
   - step 3 tool tray: gate passed, ⬜ browser checkpoint pending
@@ -45,16 +45,44 @@
 ### Steps 6-8 (this session)
 
 - **step 6 docked tray** — bottom drawer; grip drag = ns-resize; dblclick collapse/expand; `auto` = collapse on pointerleave. Render height FH 220 to 440.
-- **step 7 GRAVITY VIEW** — Barnes-Hut n-body. theta=0.7, softening eps2=90, adaptive leaf capacity S_LEAF=4 (borrowed from Carrier-Greengard-Rokhlin 1988 section 3.1). 700 particles + 4 cores, mutual self-gravity, momentum-conserving mergers. Triggers by register: low=mass injection, mid=velocity kick toward field COM, high=radial shimmer.
+- **step 7 gravity view (SUPERSEDED — see step 9)** — was Barnes-Hut n-body over 700 particles + 4 merging cores. That renderer NO LONGER EXISTS; it was replaced wholesale in step 9. Kept here only because the debugging lessons below outlived the code.
   MEASURED: 1.0% mean / 4.8% worst force error vs direct O(N^2); 3.0 ms/frame vs 9.5 ms direct; 5.6x headroom at 60fps.
   FMM DECLINED: its own Table 1 shows direct and adaptive FMM tie at N=100 and FMM needs N~1600 for 10x. accelAt() is the documented swap seam.
-- **step 7.1/7.2 containment** — merged remnant drifted off screen. Causes: (a) CORE TUNNELING, merge fired at a fixed 16px but a slingshotting core travels further per frame and passes through; fixed with mass-scaled capture radius (6+0.30*sqrt(m)) AND speed cap VMAX=7 strictly below the minimum capture radius. (b) FRAME CHASING A RUNAWAY, centroid anchoring let one flung core drag the view; fixed by weighting m^2 so the dominant core sets the frame. (c) NO OUTER BOUND; fixed with haloPull(), zero inside 0.30 normalized ellipse, quadratic outside.
-- **step 7.3 MASS SINK + BUFFER OVERRUN** — screen filled with one giant sun. Mass was monotonic with NO SINK. Cores now decay (M_DECAY=0.9968, floor M_MIN=90) shedding visible ejecta; fragmentation (M_MAX=2200, 3-way starburst, 80-frame noMerge cooldown) is a rare safety valve.
+- **step 7.1/7.2 containment (HISTORICAL — code removed in step 9)** — the merged remnant drifted off screen. Causes: (a) CORE TUNNELING — an interaction check at a fixed radius is defeated by a body that travels further than that radius in one frame; (b) FRAME CHASING A RUNAWAY — a plain centroid anchor lets one flung body drag the view and push everything else off the far edge; (c) NO OUTER BOUND. The lessons generalise; the code does not exist any more.
+- **step 7.3 mass sink + buffer overrun (HISTORICAL — code removed in step 9)** — mass was monotonic with no sink, so the view collapsed to one screen-filling sun; a ceiling only stalls that, a decay/shed path cures it. *** THE LOAD-BEARING LESSON: the visible symptom was drift, the actual fault was NaN. *** Packed body arrays were sized by the STARTING core count, not the maximum; fragmentation pushed the index past the end; Float32Array DISCARDS out-of-range writes SILENTLY, so slots read back undefined, quadtree bounds went NaN, and every body corrupted one frame later with nothing thrown. The onscreen check read NaN as offscreen, so two rounds of parameter tuning chased a bug no parameter could reach. This lesson is why the checklist below exists.
   *** THE REAL BUG: NaN, not drift. *** Packed body arrays were sized NP+NCORE. NCORE is the STARTING core count, not the max, so fragmentation pushed bn past the end. Float32Array DISCARDS out-of-range writes SILENTLY; slots read back undefined, quadtree bounds went NaN, every body corrupted one frame later with nothing thrown. The onscreen check read NaN as "offscreen", which is why two rounds of halo tuning did nothing. Fixed with MAXCORE=8 bounding every core-indexed allocation.
   MEASURED (idle/moderate/hammered/brutal, 6k-12k frames): NaN frames 0 in all four; cores onscreen 100% in all four; equilibrium mass 3192/3581/8099/12148, bounded.
 - **step 8 bounded viz** — opacity slider REMOVED. Tray is a flex sibling occupying real layout space, so the viz renders strictly ABOVE the beat area and tray height / viz height trade off directly. VIZ_MIN=140 floor.
 - **LYRIC VIEW** — built in a PARALLEL SESSION. Scrolling kinetic typography, per-letter bass envelope with fast attack / slow release, focus line at 40% width, travelling wave, hue cycling. Text from the `lyricIn` transport input via the app-level `lyricText` global.
 
+
+### Step 9 (parallel session, commits 757d343 and bec85ec)
+
+- **panel fills the window width** (`757d343`). Introduced `:root` custom properties as the
+  hook for the rest of the panel reorganisation: `--step-h`, `--step-gap`, `--name-w`,
+  `--name-fs`, `--pad-x`, all `clamp()`-based so the grid scales with viewport width.
+- **gravity rewritten: two bodies and a moon per channel** (`bec85ec`). Barnes-Hut, the
+  700-particle cloud, core merging, fragmentation, mass decay, the halo and the COM anchoring
+  are ALL DELETED. The new model: a primary at centre, a secondary on a fixed circular orbit,
+  and at most one moon per channel orbiting the SECONDARY. A channel's first trigger spawns its
+  moon; every moon's orbit decays continuously (`MOON_DECAY`) and every trigger on that
+  channel shoves it back out (`MOON_KICK`). Orbits are advanced PARAMETRICALLY, so the
+  secondary's path is exactly circular and cannot drift — the entire class of containment bugs
+  from 7.1/7.2 is designed out rather than defended against. Kepler's third law sets angular
+  rate (w proportional to r^-1.5), which is what makes an infalling moon visibly wind up.
+  WHY: N is two plus at most sixteen. Even direct evaluation would have been free, so a tree was
+  paying for a scale that never arrived.
+  EMERGENT PROPERTY worth preserving: nothing tracks is the music playing. A busy channel holds
+  its moon out against the decay, a sparse one spirals in and strikes, and silence returns the
+  system to two bodies — that reading falls out of decay versus trigger rate on its own. Do not
+  replace it with a state flag.
+  VERIFIED by review (headless, against the code not the comments): lone moon falls in 359 frames
+  = 6.0s, matching the stated ~6s; 16 seeded moons all gone 6.4s after triggers stop and sparks
+  clear; busy channel (every 8 frames) holds its moon at 0.93 rOut while a sparse one (every 4s)
+  sits at 0.36 rOut. Benign: MOON_KICK*(0.5+vol*viz) reaches 1.19 at max intensity so a kick can
+  overshoot rOut, but measured peak is 1.002 because decay claws it back each frame.
+  Confirmed no dead references left from the removal (accelAt, buildTree, MAXCORE, haloPull,
+  recenterCOM, qBodies, fragment all zero); all four views cycle, one bus listener.
 ### MULTI-SESSION MERGE HAZARD (near-miss, 2026-08-05)
 
 The lyric view was built in one thread while gravity was built in another. The second
@@ -87,7 +115,7 @@ Check any view where things MOVE, COMBINE or ACCUMULATE -- Sand and Organic espe
   IDENTICAL through a boolean position check.
 - **When a fix has NO EFFECT, stop tuning and trace the state.**
 
-REUSE NOTE: Barnes-Hut only pays above roughly N~150; below that the tree build costs
+REUSE NOTE (updated at step 9): there is NO force-evaluation code left in this repo — step 9 replaced Barnes-Hut with parametric orbits. If a future view ever needs real mutual forces, the thresholds still hold: direct summation below roughly N~150, a tree only above it. Sand remains a CONTACT problem (short-range neighbours), not long-range 1/r^2 — a uniform grid or heightmap beats a tree there. Organic's blobs (~16) want direct summation. Do NOT reintroduce a tree without an N that justifies it.
 more than direct summation. Alpha's creatures (16), Spiral's comets (~120) and Organic's
 blobs (~16) should all use direct summation. Sand is a CONTACT problem (short-range
 neighbours), not long-range 1/r^2 -- a uniform grid or heightmap beats a tree there. Do
