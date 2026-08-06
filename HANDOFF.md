@@ -45,7 +45,7 @@
 ### Steps 6-8 (this session)
 
 - **step 6 docked tray** — bottom drawer; grip drag = ns-resize; dblclick collapse/expand; `auto` = collapse on pointerleave. Render height FH 220 to 440.
-- **step 7 gravity view (SUPERSEDED — see step 9)** — was Barnes-Hut n-body over 700 particles + 4 merging cores. That renderer NO LONGER EXISTS; it was replaced wholesale in step 9. Kept here only because the debugging lessons below outlived the code.
+- **step 7 gravity view (SUPERSEDED — see step 9)** — was Barnes-Hut n-body over 700 particles + 4 merging cores. Built to spec: Barnes-Hut was the requested approach and it met its numbers (1.0% mean force error vs direct, 3.0ms/frame vs 9.5ms). That renderer NO LONGER EXISTS — step 9 replaced it because the VISUALISATION changed, not because the solver was wrong. Kept here because the debugging lessons below outlived the code.
   MEASURED: 1.0% mean / 4.8% worst force error vs direct O(N^2); 3.0 ms/frame vs 9.5 ms direct; 5.6x headroom at 60fps.
   FMM DECLINED: its own Table 1 shows direct and adaptive FMM tie at N=100 and FMM needs N~1600 for 10x. accelAt() is the documented swap seam.
 - **step 7.1/7.2 containment (HISTORICAL — code removed in step 9)** — the merged remnant drifted off screen. Causes: (a) CORE TUNNELING — an interaction check at a fixed radius is defeated by a body that travels further than that radius in one frame; (b) FRAME CHASING A RUNAWAY — a plain centroid anchor lets one flung body drag the view and push everything else off the far edge; (c) NO OUTER BOUND. The lessons generalise; the code does not exist any more.
@@ -70,8 +70,14 @@
   secondary's path is exactly circular and cannot drift — the entire class of containment bugs
   from 7.1/7.2 is designed out rather than defended against. Kepler's third law sets angular
   rate (w proportional to r^-1.5), which is what makes an infalling moon visibly wind up.
-  WHY: N is two plus at most sixteen. Even direct evaluation would have been free, so a tree was
-  paying for a scale that never arrived.
+  WHY: the creative brief changed. Barnes-Hut was not a mistake and was not over-engineering — it
+  was the requested approach (the user's goal was Barnes-Hut; the FMM paper was the route to it) and
+  it worked: measured 1.0% mean force error vs direct O(N^2) at 3.0ms/frame vs 9.5ms, 5.6x headroom.
+  Step 9 asks for a DIFFERENT VISUALISATION — two bodies and a moon per channel — for which N is
+  two plus at most sixteen, so no solver is needed at all. Do not read this as 	he tree was wrong;
+  read it as 	he picture changed. Equally, the 7.1-7.3 bugs were NOT caused by Barnes-Hut: they
+  came from the simulation wrapped around it (merging cores, unbounded mass injection,
+  fragmentation), and the NaN was a buffer-sizing error that direct summation would have hit too.
   EMERGENT PROPERTY worth preserving: nothing tracks is the music playing. A busy channel holds
   its moon out against the decay, a sparse one spirals in and strikes, and silence returns the
   system to two bodies — that reading falls out of decay versus trigger rate on its own. Do not
