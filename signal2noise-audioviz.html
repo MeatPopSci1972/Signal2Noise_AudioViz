@@ -6,11 +6,23 @@
 <title>Signal2Noise AudioViz v9</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
+/* ── Panel scaling (v9 step 9) ───────────────────────────────────────
+   The sequencer used to cap out at ~700px and strand the rest of a wide
+   window. These drive every horizontal measure in the grid so the panel
+   fills what it is given, and clamp so an ultrawide does not produce
+   absurd slabs. */
+:root{
+  --step-h:clamp(18px,1.45vw,30px);
+  --step-gap:clamp(2px,.22vw,5px);
+  --name-w:clamp(44px,4.6vw,88px);
+  --name-fs:clamp(8px,.62vw,11px);
+  --pad-x:clamp(6px,.7vw,18px);
+}
 #app{background:#080808;font-family:monospace;overflow:hidden;display:flex;flex-direction:column;width:100%;height:100vh}
 #fireWrap{position:relative;width:100%;background:#000;flex:1 1 auto;min-height:0;cursor:pointer;overflow:hidden}
 #cv,#vfx{position:absolute;top:0;left:0;width:100%;height:100%;display:block}
 #vfx{pointer-events:none}
-#transport{display:flex;align-items:center;gap:7px;padding:5px 9px;background:#050505;border-bottom:1px solid #161616;flex-wrap:wrap}
+#transport{display:flex;align-items:center;gap:7px;padding:5px var(--pad-x);background:#050505;border-bottom:1px solid #161616;flex-wrap:wrap}
 #playBtn{background:#111;color:#fa0;border:1px solid #fa0;border-radius:3px;font-size:11px;padding:4px 11px;cursor:pointer;font-family:monospace}
 #playBtn.on{background:#fa0;color:#000}
 .tctl{display:flex;align-items:center;gap:4px}
@@ -21,37 +33,37 @@ input[type=range]{accent-color:#f60}
 #transport select{background:#0e0e0e;color:#fa0;border:1px solid #222;font-family:monospace;font-size:9px;padding:2px 3px;border-radius:2px}
 #posBar{display:flex;gap:2px;align-items:center;margin-left:auto}
 .posLed{width:6px;height:6px;border-radius:1px;background:#161616}.posLed.on{background:#fa0}
-#presetBar{display:flex;gap:4px;align-items:center;flex-wrap:wrap;padding:5px 9px;background:#040404;border-bottom:1px solid #0f0f0f}
+#presetBar{display:flex;gap:4px;align-items:center;flex-wrap:wrap;padding:5px var(--pad-x);background:#040404;border-bottom:1px solid #0f0f0f}
 #presetBar label{color:#2a2a2a;font-size:9px}
 .preset{background:#090909;color:#555;border:1px solid #161616;border-radius:2px;font-size:9px;padding:3px 7px;cursor:pointer;font-family:monospace;transition:color .1s,border-color .1s,background .1s}
 .preset:hover{color:#fa0;border-color:#fa0}.preset.active{color:#fa0;border-color:#fa0;background:#1a1000}
 .preset.sampled{color:#4fa;border-color:#1a3a2a}.preset.util{color:#4af;border-color:#1a3a5a}.preset.util:hover{color:#8df;border-color:#4af}.preset.util.active{background:#001018;color:#8df}
 .preset.danger{color:#f64;border-color:#3a1a0a}.preset.danger:hover{color:#f96;border-color:#f64}
-#grid{padding:2px 6px}
-.ch{display:flex;align-items:center;margin-bottom:2px;gap:0}
-.chName{width:44px;font-size:8px;color:#555;text-align:right;padding-right:5px;flex-shrink:0;white-space:nowrap;cursor:pointer;border-radius:2px;transition:color .1s,background .1s}
+#grid{padding:var(--step-gap) var(--pad-x);width:100%}
+.ch{display:flex;align-items:center;margin-bottom:var(--step-gap);gap:0;width:100%}
+.chName{width:var(--name-w);font-size:var(--name-fs);color:#555;text-align:right;padding-right:6px;flex:0 0 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;border-radius:2px;transition:color .1s,background .1s}
 .chName:hover{color:#fa0}
 .chName.sel{color:#fa0;background:#1a1000}
 .chName.intOff{opacity:.4}
-.steps{display:flex;gap:2px;flex:1}
-.step{flex:1;max-width:44px;height:18px;border-radius:2px;border:1px solid #161616;background:#0c0c0c;cursor:pointer}
+.steps{display:flex;gap:var(--step-gap);flex:1 1 auto;min-width:0}
+.step{flex:1 1 0;min-width:0;height:var(--step-h);border-radius:2px;border:1px solid #161616;background:#0c0c0c;cursor:pointer}
 .step:hover{border-color:#2a2a2a}.step.on{border-color:#666}.step.cur{border-color:#fa0!important}.step.on.cur{background:#fa0!important;border-color:#fca!important}
-.sep{width:3px;flex-shrink:0}
+.sep{width:var(--step-gap);flex:0 0 auto}
 .pill{font-size:7px;padding:1px 4px;border-radius:2px;border:1px solid #1e1e1e;background:#0a0a0a;color:#333;cursor:pointer;white-space:nowrap;user-select:none}
 .pill:hover{border-color:#444;color:#666}.pill.on{color:#000;border-color:transparent}.pill.half{color:#000;border-color:#444}
 /* ── Channel strip (v9 step 4): one control set for the selected channels ── */
-#chanStrip{display:flex;gap:5px;align-items:center;flex-wrap:wrap;padding:5px 9px;background:#040404;border-bottom:1px solid #0f0f0f}
+#chanStrip{display:flex;gap:5px;align-items:center;flex-wrap:wrap;padding:5px var(--pad-x);background:#040404;border-bottom:1px solid #0f0f0f}
 #chanStrip label{color:#2a2a2a;font-size:9px}
 .cbtn{background:#090909;color:#555;border:1px solid #161616;border-radius:2px;font-size:9px;padding:3px 7px;cursor:pointer;font-family:monospace}
 .cbtn:hover{color:#fa0;border-color:#fa0}
-#stripPills{display:flex;gap:3px;flex:1;min-width:260px}
+#stripPills{display:flex;gap:var(--step-gap);flex:1 1 auto;min-width:260px}
 #stripPills .pill{flex:1;text-align:center}
 #stripPills .pill,#stripInt{font-size:10px;padding:4px 6px}
 #stripVol{width:62px}
 #stripHint{color:#2a2a2a;font-size:9px;display:none}
 #chanStrip.idle #stripHint{display:inline}
 #chanStrip.idle #stripPills,#chanStrip.idle .tctl,#chanStrip.idle #stripInt{opacity:.35;pointer-events:none}
-#vizBar{height:22px;background:#000;border-top:1px solid #080808;display:flex;align-items:flex-end;gap:1px;padding:1px 6px}
+#vizBar{height:clamp(22px,1.8vw,34px);background:#000;border-top:1px solid #080808;display:flex;align-items:flex-end;gap:1px;padding:1px var(--pad-x)}
 .vcol{flex:1;border-radius:1px 1px 0 0;min-height:1px}
 #samplerPanel{background:#030303;border-top:1px solid #161616;padding:6px 9px}
 #samplerTop{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:5px}
@@ -92,7 +104,7 @@ input[type=range]{accent-color:#f60}
 #toolsBtn{margin-left:auto;background:#090909;color:#555;border:1px solid #161616;border-radius:2px;font-size:9px;padding:3px 9px;cursor:pointer;font-family:monospace;transition:color .1s,border-color .1s}
 #toolsBtn:hover,#toolsBtn.on{color:#fa0;border-color:#fa0}
 /* ── View tab bar (new in v9) ── */
-#viewTabs{display:flex;gap:4px;align-items:center;padding:4px 9px;background:#040404;border-bottom:1px solid #0f0f0f}
+#viewTabs{display:flex;gap:4px;align-items:center;padding:4px var(--pad-x);background:#040404;border-bottom:1px solid #0f0f0f}
 #viewTabs label{color:#2a2a2a;font-size:9px}
 .vtab{background:#090909;color:#555;border:1px solid #161616;border-radius:2px;font-size:9px;padding:3px 9px;cursor:pointer;font-family:monospace;transition:color .1s,border-color .1s,background .1s;user-select:none}
 .vtab:hover{color:#fa0;border-color:#fa0}
